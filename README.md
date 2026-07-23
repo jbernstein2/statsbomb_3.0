@@ -1,4 +1,4 @@
-# Match Report Generator
+**# Match Report Generator
 
 Turns StatsBomb CSV exports (all-events + crosses, for two teams) into:
 
@@ -70,3 +70,4 @@ pg.generate_report(
 - The "Top Performers" table columns are controlled by
   `pptx_generator.TOP_PLAYERS_DISPLAY_COLS`, and which stat they're
   ranked by is `TOP_PLAYERS_SORT_COL`.
+**
