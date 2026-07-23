@@ -577,8 +577,6 @@ def generate_report(
         least stats_processor.MAIN_METRICS (plus, optionally, 'PPDA'
         and stats_processor.SUPPLEMENTARY_METRICS).
     team_color / opponent_color: hex strings, e.g. '#0B3D91'.
-    team_score / opponent_score: optional ints for the title-slide
-        scoreline (e.g. from stats_processor.count_goals()).
     team_player_stats_csv / opponent_player_stats_csv: optional paths
         to per-player stat CSVs (from
         stats_processor.player_stats_to_csv_df()); required for the
