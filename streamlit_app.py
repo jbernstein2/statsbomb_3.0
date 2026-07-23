@@ -115,11 +115,18 @@ def main():
     # 5. Optional report metadata
     # ------------------------------------------------------------
     st.header("5. Report details")
-    match_title = st.text_input(
-        "Match title (title slide headline)",
-        value=f"{opponent_display_name} vs. {bkfc_display_name}",
-    )
-    subtitle = st.text_input("Subtitle (competition / date, optional)", value="")
+    col_meta_1, col_meta_2 = st.columns(2)
+    with col_meta_1:
+        kicker = st.text_input("Eyebrow / kicker text", value="STATSBOMB MATCH RECAP")
+        match_date = st.text_input("Match date (footer, e.g. 7-18-2026)", value="")
+    with col_meta_2:
+        subtitle = st.text_input(
+            "Subtitle",
+            value="STATISTICAL MATCH ANALYSIS  \u2022  PLAYER & TEAM PERFORMANCE BREAKDOWN",
+        )
+        include_supplementary_table = st.checkbox(
+            "Include supplementary KPI table (PPDA + secondary stats)", value=True
+        )
 
     st.divider()
 
@@ -153,29 +160,36 @@ def main():
     # ------------------------------------------------------------
     with st.spinner("Crunching the numbers..."):
         try:
-            bkfc_result = sp.analyze_team(bkfc_events_file, bkfc_crosses_file)
-            # Uploaded files are single-use streams in Streamlit; re-seek
-            # opponent files too since they were consumed once already.
-            opp_events_file.seek(0)
-            opp_crosses_file.seek(0)
-            opponent_result = sp.analyze_team(opp_events_file, opp_crosses_file)
+            bkfc_events_df, bkfc_crosses_df = sp.load_team_data(bkfc_events_file, bkfc_crosses_file)
+            opp_events_df, opp_crosses_df = sp.load_team_data(opp_events_file, opp_crosses_file)
         except Exception as e:
             st.error(f"Failed to process the uploaded CSVs: {e}")
             return
 
+        bkfc_player_stats = sp.calculate_player_stats(bkfc_events_df, bkfc_crosses_df)
+        bkfc_team_stats = sp.calculate_team_stats(bkfc_player_stats)
+        bkfc_goals = sp.count_goals(bkfc_events_df)
+
+        opp_player_stats = sp.calculate_player_stats(opp_events_df, opp_crosses_df)
+        opp_team_stats = sp.calculate_team_stats(opp_player_stats)
+        opp_goals = sp.count_goals(opp_events_df)
+
         comparison_df = sp.build_team_comparison(
-            bkfc_result["team_stats"],
-            opponent_result["team_stats"],
+            bkfc_team_stats,
+            opp_team_stats,
             bkfc_display_name,
             opponent_display_name,
             team_ppda=bkfc_ppda,
             opponent_ppda=opponent_ppda,
         )
 
-        bkfc_players_df = sp.player_stats_to_csv_df(bkfc_result["player_stats"])
-        opponent_players_df = sp.player_stats_to_csv_df(opponent_result["player_stats"])
+        bkfc_players_df = sp.player_stats_to_csv_df(pd.DataFrame(bkfc_player_stats).T)
+        opponent_players_df = sp.player_stats_to_csv_df(pd.DataFrame(opp_player_stats).T)
 
     st.success("Stats processed.")
+
+    st.subheader("Final Score")
+    st.markdown(f"**{bkfc_display_name} {bkfc_goals} — {opp_goals} {opponent_display_name}**")
 
     st.subheader("Team KPI Comparison")
     st.dataframe(comparison_df, use_container_width=True)
@@ -216,11 +230,15 @@ def main():
                     opponent_name=opponent_display_name,
                     opponent_color=opponent_color,
                     output_path=pptx_output_path,
-                    match_title=match_title or f"{opponent_display_name} vs. {bkfc_display_name}",
-                    subtitle=subtitle or None,
+                    team_score=bkfc_goals,
+                    opponent_score=opp_goals,
+                    date_label=match_date or None,
+                    kicker=kicker,
+                    subtitle=subtitle,
                     team_player_stats_csv=bkfc_players_csv_path,
                     opponent_player_stats_csv=opponent_players_csv_path,
                     avg_position_image=avg_position_path,
+                    include_supplementary_table=include_supplementary_table,
                 )
             except Exception as e:
                 st.error(f"Failed to build the PowerPoint report: {e}")
