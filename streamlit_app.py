@@ -3,21 +3,6 @@ streamlit_app.py
 
 Streamlit front-end that ties stats_processor.py and pptx_generator.py
 together into a single report-generation workflow.
-
-Inputs collected from the user:
-  - Crosses CSV for Brooklyn FC (BKFC)
-  - All Events CSV for Brooklyn FC (BKFC)
-  - Crosses CSV for the opponent
-  - All Events CSV for the opponent
-  - Manual PPDA value for BKFC and the opponent
-  - Average position PNG for BKFC
-  - Team name (as it should appear in the deck) and brand color for
-    each side
-
-Outputs:
-  - team_comparison.csv (downloadable)
-  - <team>_players.csv / <opponent>_players.csv (downloadable)
-  - Final .pptx report (downloadable)
 """
 
 import io
@@ -33,20 +18,56 @@ import pptx_generator as pg
 
 st.set_page_config(page_title="Match Report Generator", layout="wide")
 
-DEFAULT_BKFC_NAME = "Brooklyn FC"
-DEFAULT_BKFC_COLOR = "#0B3D91"
-DEFAULT_OPPONENT_COLOR = "#F2A900"
+# Fixed defaults for Brooklyn FC
+BKFC_NAME = "Brooklyn FC"
+BKFC_COLOR = "#D4AF37"  # Gold
+
+# Standard web color name mapping for typed text input
+COLOR_NAME_MAP = {
+    "black": "#000000",
+    "gold": "#D4AF37",
+    "silver": "#C0C0C0",
+    "white": "#FFFFFF",
+    "red": "#FF0000",
+    "blue": "#0000FF",
+    "navy": "#000080",
+    "green": "#008000",
+    "yellow": "#FFFF00",
+    "orange": "#FFA500",
+    "purple": "#800080",
+    "grey": "#808080",
+    "gray": "#808080",
+}
 
 
-def _hex_is_valid(value: str) -> bool:
-    h = value.strip().lstrip("#")
-    if len(h) != 6:
-        return False
-    try:
-        int(h, 16)
-        return True
-    except ValueError:
-        return False
+def parse_color_input(color_str: str, default_hex: str = "#000000") -> tuple[str, bool]:
+    """
+    Parses user-typed color input (hex or color name).
+    Returns (hex_code, is_valid). Defaults to `default_hex` if input is empty.
+    """
+    raw = color_str.strip().lower()
+    if not raw:
+        return default_hex, True
+
+    if raw in COLOR_NAME_MAP:
+        return COLOR_NAME_MAP[raw], True
+
+    hex_clean = raw.lstrip("#")
+    if len(hex_clean) == 6:
+        try:
+            int(hex_clean, 16)
+            return f"#{hex_clean.upper()}", True
+        except ValueError:
+            return "", False
+    elif len(hex_clean) == 3:
+        try:
+            full_hex = "".join([c * 2 for c in hex_clean])
+            int(full_hex, 16)
+            return f"#{full_hex.upper()}", True
+        except ValueError:
+            return "", False
+
+    return "", False
 
 
 def main():
@@ -92,16 +113,27 @@ def main():
         opponent_ppda = st.number_input("Input opponent ppda", min_value=0.0, step=0.1, format="%.2f")
 
     # ------------------------------------------------------------
-    # 3. Team names & colors
+    # 3. Team details (Brooklyn fixed; Opponent inputs)
     # ------------------------------------------------------------
-    st.header("3. Team names & colors (as they'll appear in the deck)")
-    col_name_1, col_name_2 = st.columns(2)
-    with col_name_1:
-        bkfc_display_name = st.text_input("BKFC team name", value=DEFAULT_BKFC_NAME)
-        bkfc_color = st.color_picker("BKFC color", value=DEFAULT_BKFC_COLOR)
-    with col_name_2:
-        opponent_display_name = st.text_input("Opponent team name", value="Opponent")
-        opponent_color = st.color_picker("Opponent color", value=DEFAULT_OPPONENT_COLOR)
+    st.header("3. Team details")
+    col_team_1, col_team_2 = st.columns(2)
+
+    with col_team_1:
+        st.subheader("Brooklyn FC")
+        st.info(f"**Team Name:** {BKFC_NAME}\n\n**Team Color:** Gold (`{BKFC_COLOR}`)")
+
+    with col_team_2:
+        st.subheader("Opponent Details")
+        opponent_display_name = st.text_input(
+            "Opponent team name * (Required)", 
+            value="", 
+            placeholder="e.g. Rhode Island FC"
+        )
+        opponent_color_raw = st.text_input(
+            "Opponent team color (Optional - type color name or hex code)", 
+            value="", 
+            placeholder="Defaults to black if blank"
+        )
 
     # ------------------------------------------------------------
     # 4. Average position image
@@ -138,16 +170,19 @@ def main():
         st.info("Upload all four CSV files above to enable report generation.")
         return
 
-    if not _hex_is_valid(bkfc_color) or not _hex_is_valid(opponent_color):
-        st.error("Team colors must be valid hex colors.")
+    # Validation for Opponent Name
+    if not opponent_display_name.strip():
+        st.error("Opponent team name is required.")
         return
 
-    if not bkfc_display_name.strip() or not opponent_display_name.strip():
-        st.error("Both team names are required.")
+    if opponent_display_name.strip().lower() == BKFC_NAME.lower():
+        st.error("Opponent team name cannot be 'Brooklyn FC'.")
         return
 
-    if bkfc_display_name.strip() == opponent_display_name.strip():
-        st.error("BKFC and opponent team names must be different.")
+    # Validation & Parsing for Opponent Color
+    opponent_color, is_color_valid = parse_color_input(opponent_color_raw, default_hex="#000000")
+    if not is_color_valid:
+        st.error("Invalid opponent color. Please enter a valid hex code (e.g. #FF0000) or color name (e.g. 'black', 'navy', 'red').")
         return
 
     generate = st.button("Generate report", type="primary")
@@ -177,8 +212,8 @@ def main():
         comparison_df = sp.build_team_comparison(
             bkfc_team_stats,
             opp_team_stats,
-            bkfc_display_name,
-            opponent_display_name,
+            BKFC_NAME,
+            opponent_display_name.strip(),
             team_ppda=bkfc_ppda,
             opponent_ppda=opponent_ppda,
         )
@@ -189,12 +224,12 @@ def main():
     st.success("Stats processed.")
 
     st.subheader("Final Score")
-    st.markdown(f"**{bkfc_display_name} {bkfc_goals} — {opp_goals} {opponent_display_name}**")
+    st.markdown(f"**{BKFC_NAME} {bkfc_goals} — {opp_goals} {opponent_display_name.strip()}**")
 
     st.subheader("Team KPI Comparison")
     st.dataframe(comparison_df, use_container_width=True)
 
-    tab_bkfc, tab_opp = st.tabs([f"{bkfc_display_name} players", f"{opponent_display_name} players"])
+    tab_bkfc, tab_opp = st.tabs([f"{BKFC_NAME} players", f"{opponent_display_name.strip()} players"])
     with tab_bkfc:
         st.dataframe(bkfc_players_df, use_container_width=True)
     with tab_opp:
@@ -208,8 +243,8 @@ def main():
             tmp = Path(tmpdir)
 
             comparison_csv_path = tmp / "team_comparison.csv"
-            bkfc_players_csv_path = tmp / f"{bkfc_display_name}_players.csv"
-            opponent_players_csv_path = tmp / f"{opponent_display_name}_players.csv"
+            bkfc_players_csv_path = tmp / f"{BKFC_NAME}_players.csv"
+            opponent_players_csv_path = tmp / f"{opponent_display_name.strip()}_players.csv"
 
             comparison_df.to_csv(comparison_csv_path, index=False)
             bkfc_players_df.to_csv(bkfc_players_csv_path, index=False)
@@ -225,9 +260,9 @@ def main():
             try:
                 pg.generate_report(
                     comparison_csv=comparison_csv_path,
-                    team_name=bkfc_display_name,
-                    team_color=bkfc_color,
-                    opponent_name=opponent_display_name,
+                    team_name=BKFC_NAME,
+                    team_color=BKFC_COLOR,
+                    opponent_name=opponent_display_name.strip(),
                     opponent_color=opponent_color,
                     output_path=pptx_output_path,
                     team_score=bkfc_goals,
@@ -272,16 +307,16 @@ def main():
     col_dl_3, col_dl_4 = st.columns(2)
     with col_dl_3:
         st.download_button(
-            f"⬇️ Download {bkfc_display_name} player stats CSV",
+            f"⬇️ Download {BKFC_NAME} player stats CSV",
             data=bkfc_players_csv_bytes,
-            file_name=f"{bkfc_display_name}_players.csv",
+            file_name=f"{BKFC_NAME}_players.csv",
             mime="text/csv",
         )
     with col_dl_4:
         st.download_button(
-            f"⬇️ Download {opponent_display_name} player stats CSV",
+            f"⬇️ Download {opponent_display_name.strip()} player stats CSV",
             data=opponent_players_csv_bytes,
-            file_name=f"{opponent_display_name}_players.csv",
+            file_name=f"{opponent_display_name.strip()}_players.csv",
             mime="text/csv",
         )
 
