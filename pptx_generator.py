@@ -630,7 +630,68 @@ def generate_report(
         add_image_slide(prs, f"{team_name} - Average Position", avg_position_image, team_name, team_rgb)
 
     # 6. Full-time summary slide
-    add_fulltime_slide(prs, comparison_df, team_name, opponent_name, team_rgb, opponent_rgb)
+    def add_fulltime_slide(prs, comparison_df, team_name, opponent_name, team_color, opponent_color,
+                        metrics=None):
+    metrics = metrics or sp.MAIN_METRICS
+    labels = [label for label, _ in metrics]
+    rows = comparison_df[comparison_df["Metric"].isin(labels)]
+
+    team_wins = int((rows[team_name] > rows[opponent_name]).sum())
+    opponent_wins = int((rows[opponent_name] > rows[team_name]).sum())
+    ties = int(len(rows) - team_wins - opponent_wins)
+
+    slide = _blank_slide(prs)
+    _add_background(slide, prs, BG_DARK)
+    _add_decorative_arc(slide, prs)
+
+    _add_textbox(slide, Inches(0.8), Inches(0.6), Inches(6.0), Inches(0.4),
+                 "F U L L - T I M E", size=14, color=GREY_LABEL)
+
+    if team_wins > opponent_wins:
+        headline = f"{team_name} leads the match statistics"
+    elif opponent_wins > team_wins:
+        headline = f"{opponent_name} leads the match statistics"
+    else:
+        headline = "Match statistics are evenly split"
+
+    _add_textbox(slide, Inches(0.8), Inches(1.15), Inches(11.5), Inches(0.7),
+                 headline, size=30, bold=True, color=CREAM, font_name=HEADER_FONT)
+
+    # Ensure opponent_color is legible on BG_DARK if black is selected
+    opp_luminance = 0.299 * opponent_color[0] + 0.587 * opponent_color[1] + 0.114 * opponent_color[2]
+    opp_display_color = CREAM if opp_luminance < 60 else opponent_color
+
+    stat_specs = [
+        (team_wins, f"categories won\nby {team_name}", team_color),
+        (opponent_wins, f"categories won\nby {opponent_name}", opp_display_color),
+        (ties, "categories tied", GREY_LABEL),
+    ]
+
+    box_w = Inches(3.4)
+    gap = Inches(0.6)
+    total_w = box_w * 3 + gap * 2
+    start_x = Emu(int((prs.slide_width - total_w) / 2))
+    top = Inches(2.9)
+
+    for i, (value, caption, color) in enumerate(stat_specs):
+        left = Emu(int(start_x + i * (box_w + gap)))
+        _add_textbox(slide, left, top, box_w, Inches(1.3),
+                     str(value), size=64, bold=True, color=color, align=PP_ALIGN.CENTER,
+                     font_name=HEADER_FONT)
+        cap_box = slide.shapes.add_textbox(left, top + Inches(1.35), box_w, Inches(0.7))
+        tf = cap_box.text_frame
+        tf.word_wrap = True
+        for j, line in enumerate(caption.split("\n")):
+            p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
+            p.alignment = PP_ALIGN.CENTER
+            run = p.add_run()
+            run.text = line
+            run.font.size = Pt(13)
+            run.font.color.rgb = GREY_LABEL
+            run.font.name = BODY_FONT
+
+    _add_footer(slide, prs, "Match Recap Complete", f"{team_name.upper()} vs {opponent_name.upper()}", on_dark=True)
+    return slide
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
