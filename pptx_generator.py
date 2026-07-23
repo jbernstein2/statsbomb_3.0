@@ -3,24 +3,14 @@ pptx_generator.py
 
 Turns the CSV files produced by stats_processor.py (a team-comparison
 KPI table + per-player stat tables) into a formatted PowerPoint
-(.pptx) report styled after a StatsBomb-style match recap deck:
-
-  1. Title slide - dark background, scoreline, team monogram
-  2. Team Totals - one horizontal grouped-bar chart of the 12
-     headline KPIs
-  3. One slide per headline KPI - team-total callout + side-by-side
-     player-by-player horizontal bar charts
-  4. (optional) Supplementary KPI table (PPDA + secondary stats)
-  5. (optional) Average-position image slide
-  6. Full-Time summary - categories won / lost / tied
-
-This module has no Streamlit dependency - it can be run standalone or
-imported by streamlit_app.py.
+(.pptx) report styled after a StatsBomb-style match recap deck.
 """
 
+import io
 from pathlib import Path
 
 import pandas as pd
+from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -52,9 +42,18 @@ BODY_FONT = "Calibri"
 
 MAX_PLAYERS_PER_CHART = 16
 
+# Automatic logo resolution search paths
+DEFAULT_LOGO_PATHS = [
+    Path("assets/Brooklyn_FC_logo.svg.webp"),
+    Path("assets/brooklyn_fc_logo.png"),
+    Path("assets/brooklyn_fc_logo.jpg"),
+    Path("assets/logo.png"),
+    Path("brooklyn_fc_logo.png"),
+]
+
 
 # ============================================================
-# COLOR HELPERS
+# COLOR & FILE HELPERS
 # ============================================================
 
 def _hex_to_rgb(hex_color):
@@ -67,6 +66,14 @@ def _hex_to_rgb(hex_color):
 def _readable_text_color(rgb_color):
     luminance = 0.299 * rgb_color[0] + 0.587 * rgb_color[1] + 0.114 * rgb_color[2]
     return DARK_TEXT if luminance > 150 else RGBColor(0xFF, 0xFF, 0xFF)
+
+
+def _find_default_logo() -> Path | None:
+    """Finds an existing logo file automatically from common paths."""
+    for p in DEFAULT_LOGO_PATHS:
+        if p.exists():
+            return p
+    return None
 
 
 # ============================================================
@@ -139,8 +146,34 @@ def _add_monogram(slide, center_x, center_y, diameter, letter, fill_color, text_
     return circle
 
 
+def _add_logo(slide, center_x, center_y, max_dim, logo_path):
+    """
+    Adds a logo image centered at (center_x, center_y), aspect-scaled within max_dim.
+    Converts image formats (like WebP) into an in-memory PNG stream for compatibility.
+    """
+    with Image.open(logo_path) as im:
+        img_w, img_h = im.size
+        
+        # Convert image to RGBA PNG in memory to ensure full PPTX engine compatibility
+        img_bytes = io.BytesIO()
+        im.convert("RGBA").save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+
+    aspect = img_w / img_h
+    if aspect >= 1:
+        w = max_dim
+        h = Emu(int(w / aspect))
+    else:
+        h = max_dim
+        w = Emu(int(h * aspect))
+
+    left = Emu(int(center_x - w / 2))
+    top = Emu(int(center_y - h / 2))
+
+    return slide.shapes.add_picture(img_bytes, left, top, width=w, height=h)
+
+
 def _add_decorative_arc(slide, prs):
-    """A thin quarter-circle outline peeking in from the bottom-left corner."""
     diameter = Inches(3.2)
     left = Inches(-1.6)
     top = Inches(SLIDE_HEIGHT_IN - 1.6)
@@ -149,25 +182,6 @@ def _add_decorative_arc(slide, prs):
     circle.line.color.rgb = RGBColor(0x3A, 0x3A, 0x3A)
     circle.line.width = Pt(1)
     circle.shadow.inherit = False
-    return circle
-
-
-def _add_score_pill(slide, left, top, score, on_color, text_color, diameter=Inches(0.62)):
-    circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, left, top, diameter, diameter)
-    circle.fill.solid()
-    circle.fill.fore_color.rgb = on_color
-    circle.line.fill.background()
-    circle.shadow.inherit = False
-    tf = circle.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.alignment = PP_ALIGN.CENTER
-    run = p.add_run()
-    run.text = str(score)
-    run.font.size = Pt(24)
-    run.font.bold = True
-    run.font.color.rgb = text_color
-    run.font.name = HEADER_FONT
     return circle
 
 
@@ -223,10 +237,9 @@ def _style_single_series_bar_chart(chart, rgb_color, reverse_categories=True):
 # ============================================================
 
 def add_title_slide(prs, team_name, team_color, opponent_name, opponent_color,
-                     team_score=None, opponent_score=None,
                      kicker="STATSBOMB MATCH RECAP",
                      subtitle="STATISTICAL MATCH ANALYSIS  \u2022  PLAYER & TEAM PERFORMANCE BREAKDOWN",
-                     date_label=None):
+                     date_label=None, logo_image=None):
     slide = _blank_slide(prs)
     _add_background(slide, prs, BG_DARK)
     _add_decorative_arc(slide, prs)
@@ -236,9 +249,6 @@ def add_title_slide(prs, team_name, team_color, opponent_name, opponent_color,
 
     _add_textbox(slide, Inches(0.75), Inches(2.0), Inches(9.0), Inches(1.0),
                  team_name.upper(), size=44, bold=True, color=team_color, font_name=HEADER_FONT)
-    if team_score is not None:
-        _add_score_pill(slide, Inches(0.8 + 0.11 * len(team_name)), Inches(1.95), team_score,
-                         RGBColor(0xFF, 0xFF, 0xFF), DARK_TEXT)
 
     _add_textbox(slide, Inches(0.8), Inches(2.95), Inches(9.0), Inches(0.7),
                  opponent_name.upper(), size=28, italic=True, color=CREAM, font_name=HEADER_FONT)
@@ -246,8 +256,14 @@ def add_title_slide(prs, team_name, team_color, opponent_name, opponent_color,
     _add_textbox(slide, Inches(0.8), Inches(3.85), Inches(9.5), Inches(0.4),
                  subtitle, size=12, color=GREY_LABEL, letter_spaced=False)
 
-    monogram_letter = team_name.strip()[0].upper() if team_name.strip() else "?"
-    _add_monogram(slide, Inches(11.1), Inches(3.7), Inches(2.6), monogram_letter, CREAM, BG_DARK)
+    # Resolve logo path from argument, default assets, or fallback to monogram
+    logo_to_use = logo_image if (logo_image and Path(logo_image).exists()) else _find_default_logo()
+
+    if logo_to_use is not None and Path(logo_to_use).exists():
+        _add_logo(slide, Inches(11.1), Inches(3.7), Inches(2.6), logo_to_use)
+    else:
+        monogram_letter = team_name.strip()[0].upper() if team_name.strip() else "?"
+        _add_monogram(slide, Inches(11.1), Inches(3.7), Inches(2.6), monogram_letter, CREAM, BG_DARK)
 
     footer_right = f"{team_name.upper()}   vs   {opponent_name.upper()}"
     _add_footer(slide, prs, date_label or "", footer_right, on_dark=True)
@@ -460,7 +476,6 @@ def add_image_slide(prs, title, image_path, team_name, team_color, caption=None)
     max_h = Inches(5.1)
     top = Inches(1.2)
 
-    from PIL import Image
     with Image.open(image_path) as im:
         img_w, img_h = im.size
     aspect = img_w / img_h
@@ -514,7 +529,6 @@ def add_fulltime_slide(prs, comparison_df, team_name, opponent_name, team_color,
     _add_textbox(slide, Inches(0.8), Inches(1.15), Inches(11.5), Inches(0.7),
                  headline, size=30, bold=True, color=CREAM, font_name=HEADER_FONT)
 
-    # Ensure opponent_color is legible on BG_DARK if black is selected
     opp_luminance = 0.299 * opponent_color[0] + 0.587 * opponent_color[1] + 0.114 * opponent_color[2]
     opp_display_color = CREAM if opp_luminance < 60 else opponent_color
 
@@ -570,6 +584,7 @@ def generate_report(
     team_player_stats_csv=None,
     opponent_player_stats_csv=None,
     avg_position_image=None,
+    logo_image=None,
     include_supplementary_table=True,
 ):
     team_rgb = _hex_to_rgb(team_color)
@@ -588,8 +603,8 @@ def generate_report(
 
     # 1. Title slide
     add_title_slide(prs, team_name, team_rgb, opponent_name, opponent_rgb,
-                     team_score=team_score, opponent_score=opponent_score,
-                     kicker=kicker, subtitle=subtitle, date_label=date_label)
+                     kicker=kicker, subtitle=subtitle, date_label=date_label,
+                     logo_image=logo_image)
 
     # 2. Team totals slide
     add_team_totals_slide(prs, comparison_df, team_name, opponent_name, team_rgb, opponent_rgb)
