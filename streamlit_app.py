@@ -118,7 +118,7 @@ def main():
     col_meta_1, col_meta_2 = st.columns(2)
     with col_meta_1:
         kicker = st.text_input("Eyebrow / kicker text", value="STATSBOMB MATCH RECAP")
-        match_date = st.text_input("Match date & result (footer, e.g. 7-18-2026 --- 2 - 2)", value="")
+        match_date = st.text_input("Match date (footer, e.g. 7-18-2026)", value="")
     with col_meta_2:
         subtitle = st.text_input(
             "Subtitle",
