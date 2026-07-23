@@ -363,9 +363,6 @@ def add_metric_slide(prs, label, player_col, team_value, opponent_value,
     _add_textbox(slide, Inches(10.8), Inches(1.25), Inches(1.9), Inches(0.3),
                  opponent_name, size=10, color=MUTED_TEXT, align=PP_ALIGN.CENTER)
 
-    _add_textbox(slide, Inches(0.5), Inches(1.55), Inches(6.0), Inches(0.35),
-                 "PLAYER-BY-PLAYER BREAKDOWN", size=12, color=MUTED_TEXT, letter_spaced=True)
-
     half_w = Inches((SLIDE_WIDTH_IN - 1.4) / 2)
     chart_top = Inches(2.0)
     chart_h = Inches(4.6)
