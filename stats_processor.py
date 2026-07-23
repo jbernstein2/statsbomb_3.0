@@ -32,25 +32,37 @@ PENALTY_ENTRY_EVENTS = [
     "dribble"
 ]
 
-# Ordered list of (Display Label, team_stats key) used to build the
-# team comparison table. "PPDA" is handled separately since it is a
-# manually-entered value, not something derived from the CSVs.
-COMPARISON_METRICS = [
+# The 12 "headline" metrics used for the Team Totals slide, the
+# per-metric player-breakdown slides, and the Full-Time summary slide.
+# Order matches the reference deck design.
+MAIN_METRICS = [
+    ("% Pass Forward", "forward_pass_percentage"),
+    ("Completed Passes to A 1/3", "passes_to_attacking_third"),
+    ("PA Entry \u2013 passes", "passes_to_penalty_area"),
+    ("Open play crosses", "open_play_crosses"),
+    ("Successful open play crosses", "successful_open_play_crosses"),
+    ("A1/2 Recoveries", "attacking_half_recoveries"),
+    ("PA Entry \u2013 dribble", "penalty_entries"),
+    ("RZ Shots", "red_zone_shots"),
+    ("Attempted RZ Passes", "red_zone_passes_attempted"),
+    ("Completed RZ Passes", "red_zone_passes_completed"),
+    ("RZ touches", "red_zone_touches"),
+    ("A3 Touches", "touches_attacking_third"),
+]
+
+# Extra metrics that don't get their own slide but are useful in the
+# supplementary KPI table (along with the manually-entered PPDA).
+SUPPLEMENTARY_METRICS = [
     ("Total Passes", "total_passes"),
-    ("Forward Pass %", "forward_pass_percentage"),
     ("Forward Passes (Outside Box)", "forward_passes_outside_box"),
-    ("Attacking Half Recoveries", "attacking_half_recoveries"),
-    ("Touches in Attacking Third", "touches_attacking_third"),
-    ("Passes into Attacking Third", "passes_to_attacking_third"),
-    ("Passes into Penalty Area", "passes_to_penalty_area"),
-    ("Penalty Box Entries (Carry/Dribble)", "penalty_entries"),
-    ("Red Zone Touches", "red_zone_touches"),
-    ("Red Zone Shots", "red_zone_shots"),
-    ("Open Play Crosses", "open_play_crosses"),
-    ("Successful Open Play Crosses", "successful_open_play_crosses"),
     ("Possession Lost", "possession_lost"),
     ("Possession Lost (Defensive Half)", "possession_lost_defensive_half"),
 ]
+
+# Ordered list of (Display Label, team_stats key) used to build the
+# full team comparison table. "PPDA" is handled separately since it is
+# a manually-entered value, not something derived from the CSVs.
+COMPARISON_METRICS = MAIN_METRICS + SUPPLEMENTARY_METRICS
 
 
 # ============================================================
@@ -176,7 +188,11 @@ def calculate_player_stats(events, crosses):
 
         "open_play_crosses": 0,
 
-        "successful_open_play_crosses": 0
+        "successful_open_play_crosses": 0,
+
+        "red_zone_passes_attempted": 0,
+
+        "red_zone_passes_completed": 0
 
     })
 
@@ -290,6 +306,24 @@ def calculate_player_stats(events, crosses):
 
             stats[row["Player"]]["red_zone_shots"] += 1
 
+    for _, row in passes.iterrows():
+
+        if is_red_zone(
+            row["Start X"],
+            row["Start Y"]
+        ):
+
+            stats[row["Player"]]["red_zone_passes_attempted"] += 1
+
+    for _, row in completed_passes.iterrows():
+
+        if is_red_zone(
+            row["Start X"],
+            row["Start Y"]
+        ):
+
+            stats[row["Player"]]["red_zone_passes_completed"] += 1
+
     # ----------------------------
     # POSSESSION LOST
     # ----------------------------
@@ -372,6 +406,16 @@ def calculate_player_stats(events, crosses):
         )
 
     return dict(stats)
+
+
+# ============================================================
+# GOALS (for the title-slide scoreline)
+# ============================================================
+
+def count_goals(events):
+    """Count goals scored by a team from its All Events export."""
+    shots = events[events["Event Type"] == "shot"]
+    return int((shots["Outcome"] == "goal").sum())
 
 
 # ============================================================
@@ -461,6 +505,8 @@ def build_team_comparison(
     opponent_name,
     team_ppda=None,
     opponent_ppda=None,
+    metrics=None,
+    include_ppda=True,
 ):
     """
     Build a tidy comparison dataframe with one row per KPI and one
@@ -468,16 +514,23 @@ def build_team_comparison(
     pptx generator.
 
     PPDA is passed in manually (it is not present in the StatsBomb
-    CSV export) and is always the first row of the table.
+    CSV export) and, if included, is always the first row of the
+    table. Pass metrics=stats_processor.MAIN_METRICS (etc.) to build a
+    table scoped to a subset of KPIs.
     """
 
-    rows = [{
-        "Metric": "PPDA",
-        team_name: team_ppda,
-        opponent_name: opponent_ppda,
-    }]
+    if metrics is None:
+        metrics = COMPARISON_METRICS
 
-    for label, key in COMPARISON_METRICS:
+    rows = []
+    if include_ppda:
+        rows.append({
+            "Metric": "PPDA",
+            team_name: team_ppda,
+            opponent_name: opponent_ppda,
+        })
+
+    for label, key in metrics:
         rows.append({
             "Metric": label,
             team_name: round(float(team_stats.get(key, 0)), 2),
